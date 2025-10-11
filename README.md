@@ -4,7 +4,6 @@
 # BINANCE SMART-EMA SINGLE TOKEN TRADER
 
 A fast, fully automated, GUI-based single-token EMA strategy optimizer and trader for Binance Spot.
-<img width="922" height="747" alt="Screenshot 2025-10-11 13 43 14" src="https://github.com/user-attachments/assets/ca142e3d-4bea-4c97-a8af-baaa14f91e52" />
 
 ---
 
