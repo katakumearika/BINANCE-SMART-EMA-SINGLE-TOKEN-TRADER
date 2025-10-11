@@ -201,16 +201,21 @@ python BINANCE_SMART-EMA_SINGLE_TOKEN_TRADER.py
 
 Thanks for taking a look at this code and I hope it works just as well for you as it has for me!
 
-If you would like to donate to keep this project afloat and maybe even fund late night MiGoreng binges whilst coding enhancements, you can do so using this BNB Wallet QR code. Any amount is appreciated but not mandatory!
+## 💸 Sponsor / Donate
 
-<img width="225" height="317" alt="image" src="https://github.com/user-attachments/assets/98530f17-47ee-4f3c-be45-3dc9f2bda613" />
+If you like this project, you can support development in two ways:
 
+**1. Register a Binance account with my referral link (no extra cost!):**  
+👉 [Binance Referral — CPA_00V9WDVAJY](https://www.binance.com/activity/referral-entry/CPA?ref=CPA_00V9WDVAJY)
 
-Need a referral link to make the most of Binance rewards? https://www.binance.com/activity/referral-entry/CPA?ref=CPA_00V9WDVAJY
+**2. Donate USDT or any ERC20/BEP20 token:**
 
-Referral Code: CPA_00V9WDVAJY
+`0xc22f994de2a5b55b359221b51a813b999c713751`
 
-Best of luck with your Crypto journey!! I hope it helps :)
+<img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=0xc22f994de2a5b55b359221b51a813b999c713751" alt="Donate USDT QR Code" width="200"/>
+
+Thank you for your support!
+
 
 If you find this project useful, please star ⭐ the repo.
 
