@@ -197,6 +197,25 @@ python BINANCE_SMART-EMA_SINGLE_TOKEN_TRADER.py
 
 ## Enjoy safe trading!
 
+
+Thanks for taking a look at this code and I hope it works just as well for you as it has for me!
+
+If you would like to donate to keep this project afloat and maybe even fund late night MiGoreng binges whilst coding enhancements, you can do so using this BNB Wallet QR code. Any amount is appreciated but not mandatory!
+
+image
+0xC22f994De2A5b55b359221b51A813B999c713751
+
+Do you need a referral link to make the most of Binance giving away USD?
+
+https://www.binance.com/activity/referral-entry/CPA?ref=CPA_00V9WDVAJY
+
+Referral Code: CPA_00V9WDVAJY
+
+Best of luck with your Crypto journey!! I hope it helps :)
+
+(Don't forget to check this repository for regular updates)
+
+Cheers
 If you find this project useful, please star ⭐ the repo.
 
 ---
