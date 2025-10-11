@@ -25,7 +25,7 @@ COOLDOWN_MINUTES = 4
 TP_REOPTIMIZE_HRS = 18
 DEFAULT_PAIR     = 'BNBUSDT'
 DEFAULT_LOOKBACK = 2 # days
-DEFAULT_NTRIALS  = 10000
+DEFAULT_NTRIALS  = 50000
 
 # --- Output Filter for Frozen EXE to hide debugger warnings ---
 def filter_debugger_warnings():
@@ -197,7 +197,7 @@ def multi_ema_backtest_worker(args):
         'trades': trades
     }
 
-def optimizer_single_symbol(symbol, lookback_days, tp_min=1.0, tp_max=2.0, n_trials=10000, progress_callback=None, log_callback=None):
+def optimizer_single_symbol(symbol, lookback_days, tp_min=1.0, tp_max=2.0, n_trials=50000, progress_callback=None, log_callback=None):
     if log_callback: log_callback(f"Downloading OHLCV for {symbol} ...")
     df = fetch_ohlcv(symbol, '15m', float(lookback_days) * 24)
     combos = []
@@ -380,7 +380,7 @@ class MainWindow(QMainWindow):
         h2.addWidget(self.lookback_in)
         h2.addWidget(QLabel("Random Tests:"))
         self.ntrials_in = QLineEdit(self.ntrials_val)
-        self.ntrials_in.setValidator(QDoubleValidator(10, 10000, 0, self))
+        self.ntrials_in.setValidator(QDoubleValidator(10, 50000, 0, self))
         h2.addWidget(self.ntrials_in)
         layout.addLayout(h2)
 
@@ -450,7 +450,7 @@ class MainWindow(QMainWindow):
     def get_ntrials(self):
         try:
             v = int(float(self.ntrials_in.text()))
-            return max(10, min(v, 10000))
+            return max(10, min(v, 50000))
         except Exception:
             return DEFAULT_NTRIALS
 
