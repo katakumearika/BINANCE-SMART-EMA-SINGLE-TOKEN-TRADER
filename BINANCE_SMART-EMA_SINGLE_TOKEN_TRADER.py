@@ -205,8 +205,8 @@ def optimizer_single_symbol(symbol, lookback_days, tp_min=1.0, tp_max=2.0, n_tri
     max_tp = Decimal(str(tp_max)) / Decimal('100')
     for _ in range(n_trials):
         fast = random.randint(2, 15)
-        mid  = random.randint(fast+1, 50)
-        slow = random.randint(mid+1, 180)
+        mid  = random.randint(16, 50)
+        slow = random.randint(80, 180)
         if not (fast < mid < slow):
             continue
         tp_raw = Decimal(str(round(random.uniform(float(min_tp), float(max_tp)), 4)))
