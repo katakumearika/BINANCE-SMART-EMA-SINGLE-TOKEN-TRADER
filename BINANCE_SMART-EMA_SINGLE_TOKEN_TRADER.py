@@ -21,10 +21,10 @@ from PySide6.QtGui import QDoubleValidator
 getcontext().prec = 16
 
 FEE_RATE         = Decimal('0.001')
-COOLDOWN_MINUTES = 4
+COOLDOWN_MINUTES = 6
 TP_REOPTIMIZE_HRS = 18
 DEFAULT_PAIR     = 'BNBUSDT'
-DEFAULT_LOOKBACK = 2 # days
+DEFAULT_LOOKBACK = 5 # days
 DEFAULT_NTRIALS  = 50000
 
 # --- Output Filter for Frozen EXE to hide debugger warnings ---
@@ -144,11 +144,12 @@ def multi_ema_backtest_worker(args):
             hist.pop(0)
         if len(mid_hist) > 2:
             mid_hist.pop(0)
-        if asset == 0 and len(hist) == COOLDOWN_MINUTES+1 and len(mid_hist)==2:
-            fast_trending_up = r.fast_ema > r.prev_fast
-            mid_trending_up  = r.mid_ema  > r.prev_mid
-            slow_trending_up = r.slow_ema > r.prev_slow
-            if fast_trending_up and mid_trending_up and slow_trending_up and r.fast_ema > r.slow_ema:
+        # ENTRY
+        if asset == 0 and len(hist) == COOLDOWN_MINUTES+1 and len(mid_hist) == 2:
+            fast_cross_up = (r.prev_fast < r.prev_mid) and (r.fast_ema > r.mid_ema)
+            fast_above_slow = r.fast_ema > r.slow_ema
+            mid_above_slow = r.mid_ema > r.slow_ema
+            if fast_cross_up and fast_above_slow and mid_above_slow:
                 entry_price = price * (Decimal('1') + FEE_RATE)
                 if entry_price is not None and entry_price > Decimal('0'):
                     try:
@@ -160,21 +161,17 @@ def multi_ema_backtest_worker(args):
                 else:
                     asset = Decimal('0')
                     entry_price = None
+        # EXIT
         elif asset > 0 and entry_price is not None and entry_price > Decimal('0'):
             tp_price = entry_price * (Decimal('1') + tp_net)
-            if price >= tp_price:
-                exit_price = tp_price * (Decimal('1') - FEE_RATE)
-                balance = (asset * exit_price).quantize(Decimal('1e-8'))
-                trades += 1
-                wins += 1
-                asset = Decimal('0')
-                entry_price = None
-                continue
-            if r.prev_fast > r.prev_slow and r.fast_ema < r.slow_ema:
+            fast_cross_down = (r.prev_fast > r.prev_mid) and (r.fast_ema < r.mid_ema)
+            fast_below_slow = (r.prev_fast > r.prev_slow) and (r.fast_ema < r.slow_ema)
+            mid_below_slow  = (r.prev_mid > r.prev_slow) and (r.mid_ema < r.slow_ema)
+            if price >= tp_price or fast_cross_down or fast_below_slow or mid_below_slow:
                 exit_price = price * (Decimal('1') - FEE_RATE)
                 balance = (asset * exit_price).quantize(Decimal('1e-8'))
                 trades += 1
-                if price < entry_price:
+                if price >= entry_price:
                     wins += 1
                 asset = Decimal('0')
                 entry_price = None
@@ -265,34 +262,32 @@ async def live_loop_token(symbol, fast_span, mid_span, slow_span, tp_net, log_ca
             msglog = f"{ts} {symbol} SLOW={slow_ema:.6f}({trend_str(slow_ema,slow_prev)}) FAST={fast_ema:.6f}({trend_str(fast_ema,fast_prev)}) MID={mid_ema:.6f}({trend_str(mid_ema,mid_prev)})"
             if log_callback: log_callback(msglog)
             else: print(msglog)
-            fast_trending_up = fast_ema > fast_prev
-            mid_trending_up  = mid_ema  > mid_prev
-            slow_trending_up = slow_ema > slow_prev
-            if (not in_position and len(hist)==COOLDOWN_MINUTES+1 and len(mid_hist)==2
-                and fast_trending_up and mid_trending_up and slow_trending_up and fast_ema > slow_ema):
-                bal=await async_balance(symbol[:-4])
-                if bal*price<=Decimal('5'):
-                    ub=await async_balance('USDT')
-                    qty=float((ub*(Decimal('1')-FEE_RATE)/price)//step_size*step_size)
-                    if Decimal(str(qty))>=min_qty:
-                        entry_price=price*(Decimal('1')+FEE_RATE)
-                        entrymsg = f"{ts} BUY {symbol}@{c:.6f} qty={qty}"
-                        if log_callback: log_callback(entrymsg)
-                        else: print(entrymsg)
-                        await async_new_order(symbol=symbol,side='BUY',type='MARKET',quantity=qty)
-                        in_position=True
+            # ENTRY
+            if (not in_position and len(hist) == COOLDOWN_MINUTES+1 and len(mid_hist) == 2):
+                fast_cross_up = (fast_prev < mid_prev) and (fast_ema > mid_ema)
+                fast_above_slow = fast_ema > slow_ema
+                mid_above_slow = mid_ema > slow_ema
+                if fast_cross_up and fast_above_slow and mid_above_slow:
+                    bal=await async_balance(symbol[:-4])
+                    if bal*price<=Decimal('5'):
+                        ub=await async_balance('USDT')
+                        qty=float((ub*(Decimal('1')-FEE_RATE)/price)//step_size*step_size)
+                        if Decimal(str(qty))>=min_qty:
+                            entry_price=price*(Decimal('1')+FEE_RATE)
+                            entrymsg = f"{ts} BUY {symbol}@{c:.6f} qty={qty}"
+                            if log_callback: log_callback(entrymsg)
+                            else: print(entrymsg)
+                            await async_new_order(symbol=symbol,side='BUY',type='MARKET',quantity=qty)
+                            in_position=True
+            # EXIT
             if in_position:
-                tp_price=entry_price*(Decimal('1')+tp_net)
-                if price>=tp_price:
-                    qty=float((await async_balance(symbol[:-4])//step_size)*step_size)
-                    exitmsg = f"{ts} TP SELL {symbol}@{c:.6f} qty={qty}"
-                    if log_callback: log_callback(exitmsg)
-                    else: print(exitmsg)
-                    await async_new_order(symbol=symbol,side='SELL',type='MARKET',quantity=qty)
-                    return
-                if fast_ema<slow_ema:
-                    qty=float((await async_balance(symbol[:-4])//step_size)*step_size)
-                    exitmsg = f"{ts} XDOWN SELL {symbol}@{c:.6f} qty={qty}"
+                tp_price = entry_price * (Decimal('1') + tp_net)
+                fast_cross_down = (fast_prev > mid_prev) and (fast_ema < mid_ema)
+                fast_below_slow = (fast_prev > slow_prev) and (fast_ema < slow_ema)
+                mid_below_slow = (mid_prev > slow_prev) and (mid_ema < slow_ema)
+                if price >= tp_price or fast_cross_down or fast_below_slow or mid_below_slow:
+                    qty = float((await async_balance(symbol[:-4])//step_size)*step_size)
+                    exitmsg = f"{ts} SELL {symbol}@{c:.6f} qty={qty} {'[TP]' if price>=tp_price else '[EMA cross-down]'}"
                     if log_callback: log_callback(exitmsg)
                     else: print(exitmsg)
                     await async_new_order(symbol=symbol,side='SELL',type='MARKET',quantity=qty)
@@ -300,7 +295,6 @@ async def live_loop_token(symbol, fast_span, mid_span, slow_span, tp_net, log_ca
             prev_fast = fast_ema
             prev_mid = mid_ema
             prev_slow = slow_ema
-
 class ContinuousTradingWorker(QThread):
     progress = Signal(int)
     log = Signal(str)
@@ -344,6 +338,7 @@ class ContinuousTradingWorker(QThread):
                 self.log.emit(f"Live trading error: {ex}")
     def abort(self):
         self._abort = True
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
