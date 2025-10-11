@@ -205,17 +205,12 @@ If you would like to donate to keep this project afloat and maybe even fund late
 <img width="225" height="317" alt="image" src="https://github.com/user-attachments/assets/98530f17-47ee-4f3c-be45-3dc9f2bda613" />
 
 
-Do you need a referral link to make the most of Binance giving away USD?
-
-https://www.binance.com/activity/referral-entry/CPA?ref=CPA_00V9WDVAJY
+Need a referral link to make the most of Binance rewards? https://www.binance.com/activity/referral-entry/CPA?ref=CPA_00V9WDVAJY
 
 Referral Code: CPA_00V9WDVAJY
 
 Best of luck with your Crypto journey!! I hope it helps :)
 
-(Don't forget to check this repository for regular updates)
-
-Cheers
 If you find this project useful, please star ⭐ the repo.
 
 ---
