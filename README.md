@@ -202,8 +202,8 @@ Thanks for taking a look at this code and I hope it works just as well for you a
 
 If you would like to donate to keep this project afloat and maybe even fund late night MiGoreng binges whilst coding enhancements, you can do so using this BNB Wallet QR code. Any amount is appreciated but not mandatory!
 
-image
-0xC22f994De2A5b55b359221b51A813B999c713751
+<img width="225" height="317" alt="image" src="https://github.com/user-attachments/assets/98530f17-47ee-4f3c-be45-3dc9f2bda613" />
+
 
 Do you need a referral link to make the most of Binance giving away USD?
 
