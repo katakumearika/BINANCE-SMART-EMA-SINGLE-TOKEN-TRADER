@@ -201,5 +201,3 @@ If you find this project useful, please star ⭐ the repo.
 
 ---
 
-Let me know if you want a separate **strategy explanation README** or step-by-step screenshots for VS Code.
-Ready to publish!
