@@ -1,0 +1,303 @@
+import asyncio
+import json
+import time
+import random
+import pandas as pd
+from binance.spot import Spot
+import websockets
+from tqdm import tqdm
+from datetime import datetime, timedelta
+from decimal import Decimal, ROUND_DOWN, getcontext
+import concurrent.futures
+
+getcontext().prec = 16
+
+# --- CONFIG ---
+API_KEY      = 'api key goes here'
+API_SECRET   = 'api secret goes here'
+SYMBOL       = 'bnbusdt'
+REST_SYMBOL  = 'BNBUSDT'
+INTERVAL     = '15m'
+LOOKBACK_HRS = 5 * 24
+FEE_RATE     = Decimal('0.001')
+TP_NET       = Decimal('0.033')
+N_TRIALS     = 2000
+
+DEFAULT_FAST = 7
+DEFAULT_MID  = 25
+DEFAULT_SLOW = 99
+
+client = Spot(api_key=API_KEY, api_secret=API_SECRET)
+executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
+
+def trend_str(curr, prev):
+    if curr > prev:
+        return "UP"
+    elif curr < prev:
+        return "DOWN"
+    else:
+        return "FLAT"
+
+def get_symbol_info(symbol):
+    info = client.exchange_info(symbol=symbol)
+    filters = {f['filterType']: f for f in info['symbols'][0]['filters']}
+    min_qty = Decimal(filters['LOT_SIZE']['minQty'])
+    step_size = Decimal(filters['LOT_SIZE']['stepSize'])
+    min_notional = Decimal(filters.get('MIN_NOTIONAL', {}).get('minNotional', '0'))
+    return min_qty, step_size, min_notional
+
+def get_balance(asset):
+    acc = client.account()
+    for b in acc['balances']:
+        if b['asset'] == asset:
+            return Decimal(str(b['free']))
+    return Decimal('0')
+
+def fetch_ohlcv(symbol, interval, hours, extra_candles=150):
+    end_ts = int(datetime.utcnow().timestamp() * 1000)
+    start_ts = int((datetime.utcnow() - timedelta(hours=hours)).timestamp() * 1000)
+    klines, current = [], start_ts
+    max_loops = 200
+    loops = 0
+    while current < end_ts and loops < max_loops:
+        batch = client.klines(symbol=symbol, interval=interval,
+                              startTime=current, endTime=end_ts, limit=1000)
+        if not batch or len(batch) == 0:
+            break
+        klines.extend(batch)
+        next_time = batch[-1][0] + 1
+        if next_time <= current:
+            break
+        current = next_time
+        time.sleep(0.15)
+        loops += 1
+        if len(klines) >= int((hours * 60 // 15) + extra_candles):
+            break
+    df = pd.DataFrame(klines, columns=[
+        'open_time','open','high','low','close','volume',
+        'close_time','quote_vol','n_trades',
+        'taker_base_vol','taker_quote_vol','ignore'
+    ])
+    df[['open','high','low','close','volume']] = df[['open','high','low','close','volume']].astype(float)
+    df['open_time'] = pd.to_datetime(df['open_time'], unit='ms')
+    df.set_index('open_time', inplace=True)
+    df['ohlc4'] = (df['open'] + df['high'] + df['low'] + df['close']) / 4
+    return df
+
+def quantize_qty(qty, step_size):
+    dqty = Decimal(str(qty))
+    dstep = Decimal(str(step_size))
+    return float((dqty // dstep) * dstep)
+
+def calc_buy_qty(usdt, price, min_qty, step_size, min_notional):
+    d_price = Decimal(str(price))
+    d_usdt = Decimal(str(usdt))
+    qty = (d_usdt * (Decimal('1') - FEE_RATE)) / d_price
+    qty = quantize_qty(qty, step_size)
+    if Decimal(str(qty)) < min_qty or Decimal(str(qty)) * d_price < min_notional:
+        return None
+    return qty
+
+def calc_sell_qty(asset, price, min_qty, step_size, min_notional):
+    d_asset = Decimal(str(asset))
+    d_price = Decimal(str(price))
+    qty = quantize_qty(d_asset, step_size)
+    if Decimal(str(qty)) < min_qty or Decimal(str(qty)) * d_price < min_notional:
+        return None
+    return qty
+
+def triple_ema_backtest(df, fast, mid, slow):
+    data = df.copy()
+    data['fast_ema'] = data['ohlc4'].ewm(span=fast, adjust=False).mean()
+    data['mid_ema']  = data['ohlc4'].ewm(span=mid, adjust=False).mean()
+    data['slow_ema'] = data['ohlc4'].ewm(span=slow, adjust=False).mean()
+    data[['prev_fast','prev_mid','prev_slow']] = data[['fast_ema','mid_ema','slow_ema']].shift(1)
+
+    balance, asset = Decimal('1000'), Decimal('0')
+    entry_price = None
+    trades, wins = 0, 0
+    tp_gross = TP_NET + FEE_RATE + FEE_RATE
+
+    for _, r in data.iterrows():
+        # Strict cross logic
+        crossup = (r.prev_fast < r.prev_mid and r.fast_ema >= r.mid_ema)
+        cond_above = (r.mid_ema > r.slow_ema) or (r['open'] > r.slow_ema) or (r['close'] > r.slow_ema)
+        crossdown = ((r.prev_fast > r.prev_mid and r.fast_ema <= r.mid_ema) or
+                     (r.prev_fast > r.prev_slow and r.fast_ema <= r.slow_ema))
+        # BUY
+        if asset == 0 and crossup and cond_above:
+            entry_price = Decimal(str(r['close'])) * (Decimal('1') + FEE_RATE)
+            asset = balance / entry_price
+            balance = Decimal('0')
+        # SELL
+        elif asset > 0:
+            # TP
+            tp_price = entry_price * (Decimal('1') + TP_NET + FEE_RATE + FEE_RATE)
+            if r['high'] >= float(tp_price):
+                exit_price = tp_price * (Decimal('1') - FEE_RATE)
+                balance = asset * exit_price
+                trades += 1
+                wins += int(exit_price > entry_price)
+                asset, entry_price = 0, None
+                continue
+            # Crossdown
+            if crossdown:
+                exit_price = Decimal(str(r['close'])) * (Decimal('1') - FEE_RATE)
+                balance = asset * exit_price
+                trades += 1
+                wins += int(exit_price > entry_price)
+                asset, entry_price = 0, None
+
+    # final exit
+    if asset > 0:
+        final_price = Decimal(str(data['close'].iloc[-1])) * (Decimal('1') - FEE_RATE)
+        balance = asset * final_price
+        trades += 1
+        wins += int(final_price > entry_price)
+
+    pnl = balance - Decimal('1000')
+    pnl_pct = (balance / Decimal('1000') - Decimal('1')) * Decimal('100')
+    return float(pnl), float(pnl_pct), trades, wins
+
+def find_best_params(df):
+    results = []
+    for _ in tqdm(range(N_TRIALS), desc="Backtesting"):
+        f = 7
+        m = random.randint(8, 37)         # must be >7
+        s = random.randint(m+1, m+100)    # must be >mid
+        pnl, pnl_pct, trades, wins = triple_ema_backtest(df, f, m, s)
+        results.append({'fast':f,'mid':m,'slow':s,'pnl':pnl,'pnl_pct':pnl_pct,'trades':trades,'wins':wins})
+    df_res = pd.DataFrame(results)
+    best = df_res.loc[df_res['pnl'].idxmax()]
+    print(f"\nBest backtest → Fast={int(best.fast)}, Mid={int(best.mid)}, Slow={int(best.slow)}, "
+          f"PnL={best.pnl:.2f} USDT ({best.pnl_pct:.2f}%), Trades={int(best.trades)}, Wins={int(best.wins)}")
+    return int(best.fast), int(best.mid), int(best.slow)
+
+async def async_balance(asset):
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(executor, get_balance, asset)
+
+async def async_new_order(**kwargs):
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(executor, lambda: client.new_order(**kwargs))
+
+async def live_trading_loop(fast, mid, slow):
+    min_qty, step_size, min_notional = get_symbol_info(REST_SYMBOL)
+    in_position = False
+    entry_price = None
+
+    # Seed with enough history for instant EMA readiness
+    hist = fetch_ohlcv(REST_SYMBOL, INTERVAL, hours=2, extra_candles=slow+10)
+    ema_fast = hist['ohlc4'].ewm(span=fast, adjust=False).mean().iloc[-1]
+    ema_mid  = hist['ohlc4'].ewm(span=mid,  adjust=False).mean().iloc[-1]
+    ema_slow = hist['ohlc4'].ewm(span=slow, adjust=False).mean().iloc[-1]
+
+    def next_ema(price, prev, span):
+        alpha = Decimal('2') / (Decimal(str(span)) + Decimal('1'))
+        price = Decimal(str(price))
+        prev = Decimal(str(prev))
+        return float((price - prev) * alpha + prev)
+
+    uri = f"wss://stream.binance.com:9443/ws/{SYMBOL}@kline_{INTERVAL}"
+
+    print(f"\n[INFO] Starting LIVE trading with Fast={fast} Mid={mid} Slow={slow} at {datetime.now()}\n")
+
+    # --- for 5-minute trend tracking ---
+    last_trend_time = time.time()
+    trend_interval_sec = 5 * 60
+    last_ema_fast = ema_fast
+    last_ema_mid = ema_mid
+    last_ema_slow = ema_slow
+
+    while True:
+        try:
+            async with websockets.connect(uri, ping_interval=20) as ws:
+                async for msg in ws:
+                    k = json.loads(msg)['k']
+                    if not k['x']:
+                        continue
+                    price = float(k['c'])
+                    high  = float(k['h'])
+                    low   = float(k['l'])
+                    open_ = float(k['o'])
+                    close = price
+                    ohlc4 = (open_ + high + low + close) / 4
+                    ts = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+                    # Save previous EMA for trend calculation
+                    p_f, p_m, p_s = ema_fast, ema_mid, ema_slow
+                    ema_fast = next_ema(ohlc4, ema_fast, fast)
+                    ema_mid  = next_ema(ohlc4, ema_mid,  mid)
+                    ema_slow = next_ema(ohlc4, ema_slow, slow)
+
+                    # --- CANDLE CLOSE LOG WITH EMA TREND (15m candle) ---
+                    fast_trend = trend_str(ema_fast, p_f)
+                    mid_trend = trend_str(ema_mid, p_m)
+                    slow_trend = trend_str(ema_slow, p_s)
+                    print(f"{ts} [CANDLE CLOSE] O:{open_:.6f} H:{high:.6f} L:{low:.6f} C:{close:.6f} | "
+                          f"FastEMA:{ema_fast:.6f}({fast_trend}) MidEMA:{ema_mid:.6f}({mid_trend}) SlowEMA:{ema_slow:.6f}({slow_trend})")
+
+                    # --- 5-MIN EMA TREND LOGGING ---
+                    now = time.time()
+                    if now - last_trend_time >= trend_interval_sec:
+                        fast_trend5 = trend_str(ema_fast, last_ema_fast)
+                        mid_trend5 = trend_str(ema_mid, last_ema_mid)
+                        slow_trend5 = trend_str(ema_slow, last_ema_slow)
+                        print(f"{ts} [5MIN EMA TREND] FastEMA: {ema_fast:.6f} ({fast_trend5}), "
+                              f"MidEMA: {ema_mid:.6f} ({mid_trend5}), SlowEMA: {ema_slow:.6f} ({slow_trend5})")
+                        last_trend_time = now
+                        last_ema_fast = ema_fast
+                        last_ema_mid = ema_mid
+                        last_ema_slow = ema_slow
+
+                    # --- STRICT CROSS LOGIC ---
+                    crossup = (p_f < p_m and ema_fast >= ema_mid)
+                    cond_above = ema_mid > ema_slow or open_ > ema_slow or close > ema_slow
+                    crossdown = ((p_f > p_m and ema_fast <= ema_mid) or (p_f > p_s and ema_fast <= ema_slow))
+
+                    # BUY -- ONLY ON STRICT CROSS UP
+                    if not in_position and crossup and cond_above:
+                        usdt_bal = await async_balance('USDT')
+                        qty = calc_buy_qty(usdt_bal, price, min_qty, step_size, min_notional)
+                        if qty:
+                            print(f"{ts} [BUY] @ {price:.6f}, qty={qty} | prev_f={p_f:.6f} prev_m={p_m:.6f} now_f={ema_fast:.6f} now_m={ema_mid:.6f}")
+                            try:
+                                await async_new_order(symbol=REST_SYMBOL, side='BUY', type='MARKET', quantity=qty)
+                                in_position = True
+                                entry_price = Decimal(str(price))
+                            except Exception as e:
+                                print(f"{ts} [ERROR] BUY ORDER FAILED: {e}")
+                    # SELL -- ON STRICT CROSS DOWN or TP
+                    if in_position:
+                        tp_price = entry_price * (Decimal('1') + TP_NET + FEE_RATE + FEE_RATE)
+                        if Decimal(str(high)) >= tp_price:
+                            bnb_bal = await async_balance('BNB')
+                            qty = calc_sell_qty(bnb_bal, price, min_qty, step_size, min_notional)
+                            if qty:
+                                print(f"{ts} [TP SELL] @ {price:.6f}")
+                                try:
+                                    await async_new_order(symbol=REST_SYMBOL, side='SELL', type='MARKET', quantity=qty)
+                                    in_position = False
+                                    entry_price = None
+                                except Exception as e:
+                                    print(f"{ts} [ERROR] TP SELL FAILED: {e}")
+                            continue
+                        if crossdown:
+                            bnb_bal = await async_balance('BNB')
+                            qty = calc_sell_qty(bnb_bal, price, min_qty, step_size, min_notional)
+                            if qty:
+                                print(f"{ts} [CROSSDOWN SELL] @ {price:.6f}")
+                                try:
+                                    await async_new_order(symbol=REST_SYMBOL, side='SELL', type='MARKET', quantity=qty)
+                                    in_position = False
+                                    entry_price = None
+                                except Exception as e:
+                                    print(f"{ts} [ERROR] CROSSDOWN SELL FAILED: {e}")
+        except Exception as e:
+            print(f"WS error {e}, reconnecting in 5s...")
+            await asyncio.sleep(5)
+
+if __name__ == '__main__':
+    df = fetch_ohlcv(REST_SYMBOL, INTERVAL, hours=LOOKBACK_HRS, extra_candles=150)
+    fast, mid, slow = find_best_params(df)
+    # Or use: fast, mid, slow = DEFAULT_FAST, DEFAULT_MID, DEFAULT_SLOW
+    asyncio.run(live_trading_loop(fast, mid, slow))
