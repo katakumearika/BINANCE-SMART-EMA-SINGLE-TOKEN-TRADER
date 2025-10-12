@@ -345,7 +345,7 @@ class TradingThread(QThread):
 class EMABotGUI(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("📊 Triple EMA Trading Bot")
+        self.setWindowTitle("📊 BINANCE-SMART-EMA-SINGLE-TOKEN-TRADER")
         self.setMinimumWidth(720)
         self.thread = None
 
