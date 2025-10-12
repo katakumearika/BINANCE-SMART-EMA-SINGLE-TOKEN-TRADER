@@ -146,11 +146,12 @@ class TradingThread(QThread):
 
         for _, r in data.iterrows():
             crossup = (r.prev_fast < r.prev_mid and r.fast_ema >= r.mid_ema)
+            slow_trending_up = r.slow_ema >= r.prev_slow  # 🆕 new filter
             cond_above = (r.mid_ema > r.slow_ema) or (r['open'] > r.slow_ema) or (r['close'] > r.slow_ema)
             crossdown = ((r.prev_fast > r.prev_mid and r.fast_ema <= r.mid_ema) or
                         (r.prev_fast > r.prev_slow and r.fast_ema <= r.slow_ema))
 
-            if asset == 0 and crossup and cond_above:
+            if asset == 0 and crossup and cond_above and slow_trending_up:
                 entry_price = Decimal(str(r['close'])) * (Decimal('1') + FEE)
                 asset = balance / entry_price
                 balance = Decimal('0')
@@ -266,10 +267,11 @@ class TradingThread(QThread):
                         self.log(f"[{ts}] CANDLE CLOSE | Fast:{self.ema_fast:.4f} Mid:{self.ema_mid:.4f} Slow:{self.ema_slow:.4f}")
 
                         crossup = (p_f < p_m and self.ema_fast >= self.ema_mid)
+                        slow_trending_up = self.ema_slow >= p_s  # 🆕 filter
                         cond_above = self.ema_mid > self.ema_slow or open_ > self.ema_slow or close > self.ema_slow
                         crossdown = ((p_f > p_m and self.ema_fast <= self.ema_mid) or (p_f > p_s and self.ema_fast <= self.ema_slow))
 
-                        if not in_position and crossup and cond_above:
+                        if not in_position and crossup and cond_above and slow_trending_up:
                             usdt_bal = await self.async_balance('USDT')
                             qty = self.calc_buy_qty(usdt_bal, price)
                             if qty:
@@ -311,7 +313,6 @@ class TradingThread(QThread):
                 self.log(f"⚠️ WS Error {e}, reconnecting in 5s...")
                 await asyncio.sleep(5)
 
-    # -------- Main Logic -------- #
     async def main_logic(self):
         self.client = Spot(api_key=self.cfg['api_key'], api_secret=self.cfg['api_secret'])
         self.symbol = self.cfg['symbol'].upper()
@@ -336,7 +337,6 @@ class TradingThread(QThread):
 
         self.log(f"[INFO] Starting live trading with TP={self.tp_val*100:.2f}%")
 
-        # Run 2 tasks concurrently
         task1 = asyncio.create_task(self.websocket_strategy_loop())
         task2 = asyncio.create_task(self.minute_logger())
         await asyncio.gather(task1, task2)
@@ -345,7 +345,7 @@ class TradingThread(QThread):
 class EMABotGUI(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("📊 BINANCE-SMART-EMA-SINGLE-TOKEN-TRADER")
+        self.setWindowTitle("📊 Triple EMA Trading Bot")
         self.setMinimumWidth(720)
         self.thread = None
 
