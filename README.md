@@ -12,7 +12,7 @@ Here’s an **updated README** that matches the **latest version of your bot**, 
 
 A fast, fully automated, GUI-based **EMA strategy optimizer and live trading bot** for Binance Spot.
 
-<img width="922" height="744" alt="image" src="https://github.com/user-attachments/assets/03b8b19f-ea4b-459c-9ef9-c29091f0d19a" />
+<img width="744" height="556" alt="image" src="https://github.com/user-attachments/assets/b2964c80-f1b9-411d-9185-a51c17a1d28b" />
 
 ---
 
