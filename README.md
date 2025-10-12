@@ -1,4 +1,3 @@
-Here’s an **updated README** that matches the **latest version of your bot**, including:
 
 * ✅ EMA logging every minute
 * 🕒 Signal confirmation only on 15-minute candle close
