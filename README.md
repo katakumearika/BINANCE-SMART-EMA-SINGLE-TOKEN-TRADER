@@ -1,9 +1,17 @@
+Here’s an **updated README** that matches the **latest version of your bot**, including:
+
+* ✅ EMA logging every minute
+* 🕒 Signal confirmation only on 15-minute candle close
+* 🧠 Automatic re-optimization after each SELL
+* 🖥️ GUI with Initial & Re-opt trials
+* 💡 Optimized live trading using best EMA parameters
 
 ---
 
 # BINANCE SMART-EMA SINGLE TOKEN TRADER
 
-A fast, fully automated, GUI-based single-token EMA strategy optimizer and trader for Binance Spot.
+A fast, fully automated, GUI-based **EMA strategy optimizer and live trading bot** for Binance Spot.
+
 <img width="922" height="744" alt="image" src="https://github.com/user-attachments/assets/03b8b19f-ea4b-459c-9ef9-c29091f0d19a" />
 
 ---
@@ -19,25 +27,27 @@ A fast, fully automated, GUI-based single-token EMA strategy optimizer and trade
   * [C. Windows 11](#windows11)
 * [4. Running the Bot](#running)
 * [5. Visual Studio Code Setup](#vscode)
-* [6. Notes](#notes)
+* [6. Strategy Behavior](#strategy)
+* [7. Notes](#notes)
 
 ---
 
 ## <a name="features"></a>1. Features
 
-* One-click install (all dependencies in requirements.txt)
-* GUI (PySide6) for entering keys, symbol, backtest settings, etc.
-* Randomizes and finds optimal EMAs and take-profit for best win rate
-* Runs continuous auto re-optimization and live trading
-* Fully adjustable (pair, lookback, TP range, random test count)
-* Designed to be executable-ready (.exe builds supported)
+* ✅ GUI built with PySide6 — no CLI needed.
+* 🧮 **Optimizes Fast/Mid/Slow EMAs and TP** automatically for best win rate.
+* 🔁 **Auto re-optimization after each SELL** — no restart needed.
+* ⏳ **Live EMA trend logging every 1 minute** (to monitor trend evolution).
+* 🕒 **Crossover detection only on 15-minute candle close** — avoids fake signals.
+* 💰 Fully adjustable (pair, lookback period, TP range, initial & reopt trials).
+* 🧰 Executable-ready (PyInstaller supported for Windows `.exe` builds).
 
 ---
 
 ## <a name="prerequisites"></a>2. Prerequisites
 
-* Python 3.9 or higher (recommended: Python 3.10/3.11)
-* [Binance API keys](https://www.binance.com/en/my/settings/api-management)
+* Python 3.9 or higher (3.10/3.11 recommended)
+* [Binance API keys](https://www.binance.com/en/my/settings/api-management) with **Read** and **Trade** permissions
 * Internet access
 
 ---
@@ -46,178 +56,135 @@ A fast, fully automated, GUI-based single-token EMA strategy optimizer and trade
 
 ### <a name="chromeos"></a>A. Linux on ChromeOS (Crostini)
 
-1. **Open the Terminal app** (`Ctrl + Alt + T` or via Launcher).
-2. **Update and install Python:**
-
-   ```sh
-   sudo apt update
-   sudo apt install python3 python3-pip python3-venv git -y
-   ```
-3. **(Recommended) Create a Python virtual environment:**
-
-   ```sh
-   python3 -m venv smartemaenv
-   source smartemaenv/bin/activate
-   ```
-4. **Clone the repository:**
-
-   ```sh
-   git clone https://github.com/<yourusername>/BINANCE_SMART-EMA_SINGLE_TOKEN_TRADER.git
-   cd BINANCE_SMART-EMA_SINGLE_TOKEN_TRADER
-   ```
-5. **Install Python dependencies:**
-
-   ```sh
-   pip install --upgrade pip
-   pip install -r requirements.txt --break-system-packages
-   ```
-
-   > If you get errors about system packages on ChromeOS, use `--break-system-packages` as above.
+```sh
+sudo apt update
+sudo apt install python3 python3-pip python3-venv git -y
+python3 -m venv smartemaenv
+source smartemaenv/bin/activate
+git clone https://github.com/<yourusername>/BINANCE_SMART-EMA_SINGLE_TOKEN_TRADER.git
+cd BINANCE_SMART-EMA_SINGLE_TOKEN_TRADER
+pip install --upgrade pip
+pip install -r requirements.txt --break-system-packages
+```
 
 ---
 
 ### <a name="ubuntu"></a>B. Ubuntu Linux
 
-1. **Open Terminal** (`Ctrl + Alt + T`).
-2. **Update and install Python:**
-
-   ```sh
-   sudo apt update
-   sudo apt install python3 python3-pip python3-venv git -y
-   ```
-3. **(Recommended) Create a Python virtual environment:**
-
-   ```sh
-   python3 -m venv smartemaenv
-   source smartemaenv/bin/activate
-   ```
-4. **Clone the repository:**
-
-   ```sh
-   git clone https://github.com/<yourusername>/BINANCE_SMART-EMA_SINGLE_TOKEN_TRADER.git
-   cd BINANCE_SMART-EMA_SINGLE_TOKEN_TRADER
-   ```
-5. **Install dependencies:**
-
-   ```sh
-   pip install --upgrade pip
-   pip install -r requirements.txt
-   ```
+```sh
+sudo apt update
+sudo apt install python3 python3-pip python3-venv git -y
+python3 -m venv smartemaenv
+source smartemaenv/bin/activate
+git clone https://github.com/<yourusername>/BINANCE_SMART-EMA_SINGLE_TOKEN_TRADER.git
+cd BINANCE_SMART-EMA_SINGLE_TOKEN_TRADER
+pip install --upgrade pip
+pip install -r requirements.txt
+```
 
 ---
 
 ### <a name="windows11"></a>C. Windows 11
 
-1. **Install [Python 3.11+](https://www.python.org/downloads/windows/):**
-
-   * Download and install, check "Add Python to PATH" during setup.
-2. **Install [Git for Windows](https://git-scm.com/download/win):**
-
-   * Use default options.
-3. **Open "Command Prompt" or "Windows Terminal":**
-
-   * Hit `Win + R`, type `cmd`, press Enter.
-4. **(Recommended) Create a virtual environment:**
-
-   ```cmd
-   python -m venv smartemaenv
-   smartemaenv\Scripts\activate
-   ```
-5. **Clone the repo:**
-
-   ```cmd
-   git clone https://github.com/<yourusername>/BINANCE_SMART-EMA_SINGLE_TOKEN_TRADER.git
-   cd BINANCE_SMART-EMA_SINGLE_TOKEN_TRADER
-   ```
-6. **Install dependencies:**
-
-   ```cmd
-   pip install --upgrade pip
-   pip install -r requirements.txt
-   ```
+```cmd
+python -m venv smartemaenv
+smartemaenv\Scripts\activate
+git clone https://github.com/<yourusername>/BINANCE_SMART-EMA_SINGLE_TOKEN_TRADER.git
+cd BINANCE_SMART-EMA_SINGLE_TOKEN_TRADER
+pip install --upgrade pip
+pip install -r requirements.txt
+```
 
 ---
 
 ## <a name="running"></a>4. Running the Bot
 
-**From inside the repo folder and (optionally) your virtual environment:**
+Run from inside the repo folder:
 
 ```sh
-python BINANCE_SMART-EMA_SINGLE_TOKEN_TRADER.py
+python triple_ema_gui_bot.py
 ```
 
-* The GUI should open. Enter your Binance API key/secret, trading symbol (default BNBUSDT), and other settings.
-* The config is saved after clicking "Save".
-* "Start Live Trading" begins auto-optimization and live bot execution.
+* A GUI window will open.
+* Enter your **Binance API key**, trading symbol (e.g., `BNBUSDT`), lookback, and trial counts.
+* Click **💾 Save Config** to store settings.
+* Press **▶️ Start** to begin optimization and live trading.
+
+The bot will:
+
+* 🔥 Run initial optimization to find best EMA & TP.
+* 📈 Log EMA trend every minute.
+* 📊 Wait for a 15-minute candle close to confirm crossover.
+* 💵 Place BUY/SELL orders using Binance Spot API.
+* 🔁 Re-optimize after each SELL using the “Re-Opt Trials” count.
 
 ---
 
-## <a name="vscode"></a>5. Setting Up Visual Studio Code (All Platforms)
+## <a name="vscode"></a>5. Visual Studio Code Setup (All Platforms)
 
-**Install [Visual Studio Code](https://code.visualstudio.com/):**
+```sh
+# Optional but recommended
+code .
+source smartemaenv/bin/activate  # or smartemaenv\Scripts\activate on Windows
+python triple_ema_gui_bot.py
+```
 
-* Download and install for your platform.
-
-**Open your project:**
-
-* Click "File" → "Open Folder" and select your repo folder.
-
-**Install the Python extension:**
-
-* Click the Extensions icon (four squares, left sidebar).
-* Search for "Python" and install the Microsoft extension.
-
-**(Optional but recommended)**
-
-* Open a terminal inside VS Code: `Ctrl + `` (backtick)
-* Activate your virtual environment:
-
-  * **Linux/macOS:** `source smartemaenv/bin/activate`
-  * **Windows:** `smartemaenv\Scripts\activate`
-* Run the bot with:
-
-  ```sh
-  python BINANCE_SMART-EMA_SINGLE_TOKEN_TRADER.py
-  ```
+Install the **Python extension** in VS Code for best experience.
 
 ---
 
-## <a name="notes"></a>6. Notes & Troubleshooting
+## <a name="strategy"></a>6. Strategy Behavior
 
-* **API keys:** Keep your API keys secret! Store with "Read" and "Trade" permissions only (never enable withdrawal).
-* **First run:** On first run, a `config.json` is created/saved in the same folder for your settings.
-* **Linux dependencies:** If you get errors for Qt or missing display, install:
+### 📊 1-Minute EMA Logging
+
+The bot updates and logs **Fast, Mid, and Slow EMA** every 60 seconds using Binance ticker data.
+
+### 🕒 15-Minute Candle Confirmation
+
+The bot only confirms crossovers on **15-minute candle close**, avoiding fake or premature signals.
+
+### 🔁 Auto Re-Optimization
+
+After each SELL (TP or crossdown), the bot:
+
+* Fetches fresh OHLCV data,
+* Runs the optimizer using `Re-Opt Trials` count,
+* Updates live trading parameters without restarting.
+
+---
+
+## <a name="notes"></a>7. Notes & Troubleshooting
+
+* ⚠️ **API Keys:** Never share your keys. Enable only “Spot Trading” permission.
+* 🖥️ First run creates a local `ema_bot_config.json` to save your settings.
+* 🧰 Missing Qt libraries on Linux?
 
   ```sh
   sudo apt install libxcb-cursor0 libxcb-xinerama0
   ```
-* **Upgrading:** Pull latest code with `git pull` inside your repo folder.
-* **EXE:** If building an EXE for Windows, use [PyInstaller](https://pyinstaller.org/en/stable/) (ask for special instructions if needed).
+* 🔄 Update with:
+
+  ```sh
+  git pull
+  ```
+* 🪟 EXE builds supported via [PyInstaller](https://pyinstaller.org/en/stable/).
 
 ---
-
-## Enjoy safe trading!
-
-
-Thanks for taking a look at this code and I hope it works just as well for you as it has for me!
 
 ## 💸 Sponsor / Donate
 
 If you like this project, you can support development in two ways:
 
-**1. Register a Binance account with my referral link (no extra cost!):**  
-👉 [Binance Referral — CPA_00V9WDVAJY](https://www.binance.com/activity/referral-entry/CPA?ref=CPA_00V9WDVAJY)
+1. **Register with my Binance referral link:**
+   👉 [Binance Referral — CPA_00V9WDVAJY](https://www.binance.com/activity/referral-entry/CPA?ref=CPA_00V9WDVAJY)
 
-**2. Donate USDT or any ERC20/BEP20 token:**
-
-`0xc22f994de2a5b55b359221b51a813b999c713751`
+2. **Donate USDT or any ERC20/BEP20 token:**
+   `0xc22f994de2a5b55b359221b51a813b999c713751`
 
 <img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=0xc22f994de2a5b55b359221b51a813b999c713751" alt="Donate USDT QR Code" width="200"/>
 
-Thank you for your support!
-
-
-If you find this project useful, please star ⭐ the repo.
+⭐ If you find this project useful, please star the repo!
 
 ---
 
+✅ *Stable, fast, optimized, fully automated. EMA-based. One token. Real edge.*
