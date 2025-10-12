@@ -1,11 +1,9 @@
-#Trading logic updated
 import sys
 import warnings
 import asyncio
 import json
 import pandas as pd
 from binance.spot import Spot
-import websockets
 from datetime import datetime, timezone
 from decimal import Decimal, getcontext
 import concurrent.futures
@@ -22,26 +20,10 @@ from PySide6.QtGui import QDoubleValidator
 getcontext().prec = 16
 
 FEE_RATE         = Decimal('0.001')
-COOLDOWN_MINUTES = 6
 TP_REOPTIMIZE_HRS = 18
 DEFAULT_PAIR     = 'BNBUSDT'
-DEFAULT_LOOKBACK = 5 # days
-DEFAULT_NTRIALS  = 50000
-
-# --- Output Filter for Frozen EXE to hide debugger warnings ---
-def filter_debugger_warnings():
-    class DebuggerWarningFilter:
-        def write(self, msg):
-            if "Debugger warning:" in msg or "frozen modules" in msg:
-                return
-            sys.__stderr__.write(msg)
-        def flush(self):
-            sys.__stderr__.flush()
-    sys.stderr = DebuggerWarningFilter()
-
-if getattr(sys, 'frozen', False):
-    filter_debugger_warnings()
-# -------------------------------------------------------------
+DEFAULT_LOOKBACK = 15 # days
+DEFAULT_NTRIALS  = 4000
 
 client = None
 executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
@@ -80,34 +62,16 @@ def get_symbol_info(symbol):
     min_notional = Decimal(filters['MIN_NOTIONAL']['minNotional']) if 'MIN_NOTIONAL' in filters else None
     return min_qty, step_size, min_notional
 
-def get_price(symbol):
-    ticker = client.ticker_price(symbol=symbol)
-    return Decimal(str(ticker['price']))
-
-def get_balance(asset):
-    acc = client.account()
-    for b in acc['balances']:
-        if b['asset'] == asset:
-            return Decimal(str(b['free']))
-    return Decimal('0')
-
-async def async_balance(asset):
-    loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(executor, lambda: get_balance(asset))
-
-async def async_new_order(**kwargs):
-    loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(executor, lambda: client.new_order(**kwargs))
-
-def fetch_ohlcv(symbol, interval, hours):
+def fetch_ohlcv(symbol, interval, lookback_days):
+    hours = float(lookback_days) * 24
     end_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
-    start_ms = end_ms - int(float(hours) * 3600 * 1000)
+    start_ms = end_ms - int(hours * 3600 * 1000)
     klines = client.klines(
         symbol=symbol,
         interval=interval,
         startTime=start_ms,
         endTime=end_ms,
-        limit=1000
+        limit=1500
     )
     df = pd.DataFrame(klines, columns=[
         'open_time','open','high','low','close','volume',
@@ -134,25 +98,26 @@ def multi_ema_backtest_worker(args):
     entry_price = None
     trades = 0
     wins = 0
-    hist = []
-    mid_hist = []
 
-    for r in d.itertuples():
-        price = Decimal(str(r.close))
-        hist.append(r.slow_ema)
-        mid_hist.append(r.mid_ema)
-        if len(hist) > COOLDOWN_MINUTES + 1:
-            hist.pop(0)
-        if len(mid_hist) > 2:
-            mid_hist.pop(0)
-        # ENTRY
-        if asset == 0 and len(hist) == COOLDOWN_MINUTES+1 and len(mid_hist) == 2:
-            fast_cross_up = (r.prev_fast < r.prev_mid) and (r.fast_ema > r.mid_ema)
-            fast_above_slow = r.fast_ema > r.slow_ema
-            mid_above_slow = r.mid_ema > r.slow_ema
-            if fast_cross_up and fast_above_slow and mid_above_slow:
+    d = d.reset_index()
+
+    for i in range(1, len(d)):
+        r = d.iloc[i]
+        price = Decimal(str(r['close']))
+        fast_ema = r['fast_ema']
+        mid_ema = r['mid_ema']
+        slow_ema = r['slow_ema']
+        prev_fast = r['prev_fast']
+        prev_mid = r['prev_mid']
+        prev_slow = r['prev_slow']
+
+        # --- BUY ---
+        if asset == 0 and prev_fast is not None and prev_mid is not None and prev_slow is not None:
+            cross_up = (prev_fast <= prev_mid) and (fast_ema > mid_ema)
+            mid_above_slow = mid_ema > slow_ema
+            if cross_up and mid_above_slow:
                 entry_price = price * (Decimal('1') + FEE_RATE)
-                if entry_price is not None and entry_price > Decimal('0'):
+                if entry_price > Decimal('0'):
                     try:
                         asset = (balance / entry_price).quantize(Decimal('1e-8'))
                         balance = Decimal('0')
@@ -162,13 +127,14 @@ def multi_ema_backtest_worker(args):
                 else:
                     asset = Decimal('0')
                     entry_price = None
-        # EXIT
+
+        # --- SELL ---
         elif asset > 0 and entry_price is not None and entry_price > Decimal('0'):
-            tp_price = entry_price * (Decimal('1') + tp_net)
-            fast_cross_down = (r.prev_fast > r.prev_mid) and (r.fast_ema < r.mid_ema)
-            fast_below_slow = (r.prev_fast > r.prev_slow) and (r.fast_ema < r.slow_ema)
-            mid_below_slow  = (r.prev_mid > r.prev_slow) and (r.mid_ema < r.slow_ema)
-            if price >= tp_price or fast_cross_down or fast_below_slow or mid_below_slow:
+            tp_price = entry_price * Decimal('1.01')
+            cross_down_mid = prev_fast >= prev_mid and fast_ema < mid_ema
+            cross_down_slow = prev_fast >= prev_slow and fast_ema < slow_ema
+            tp_hit = price >= tp_price
+            if cross_down_mid or cross_down_slow or tp_hit:
                 exit_price = price * (Decimal('1') - FEE_RATE)
                 balance = (asset * exit_price).quantize(Decimal('1e-8'))
                 trades += 1
@@ -176,6 +142,7 @@ def multi_ema_backtest_worker(args):
                     wins += 1
                 asset = Decimal('0')
                 entry_price = None
+
     if asset > 0 and entry_price is not None and entry_price > Decimal('0'):
         final_price = Decimal(str(d['close'].iloc[-1])) * (Decimal('1') - FEE_RATE)
         balance = (asset * final_price).quantize(Decimal('1e-8'))
@@ -195,16 +162,16 @@ def multi_ema_backtest_worker(args):
         'trades': trades
     }
 
-def optimizer_single_symbol(symbol, lookback_days, tp_min=1.0, tp_max=2.0, n_trials=50000, progress_callback=None, log_callback=None):
+def optimizer_single_symbol(symbol, lookback_days, tp_min=1.0, tp_max=2.0, n_trials=5000, progress_callback=None, log_callback=None):
     if log_callback: log_callback(f"Downloading OHLCV for {symbol} ...")
-    df = fetch_ohlcv(symbol, '15m', float(lookback_days) * 24)
+    df = fetch_ohlcv(symbol, '15m', float(lookback_days))
     combos = []
     min_tp = Decimal(str(tp_min)) / Decimal('100')
     max_tp = Decimal(str(tp_max)) / Decimal('100')
     for _ in range(n_trials):
-        fast = random.randint(2, 15)
-        mid  = random.randint(16, 50)
-        slow = random.randint(80, 180)
+        fast = random.randint(2, 7)
+        mid  = random.randint(18, 35)
+        slow = random.randint(89, 160)
         if not (fast < mid < slow):
             continue
         tp_raw = Decimal(str(round(random.uniform(float(min_tp), float(max_tp)), 4)))
@@ -220,82 +187,10 @@ def optimizer_single_symbol(symbol, lookback_days, tp_min=1.0, tp_max=2.0, n_tri
             if progress_callback:
                 percent = int(completed / total * 100)
                 progress_callback(percent)
-    # --- Highest winrate (then most trades) ---
-    best = max(results, key=lambda x: (x['winrate'], x['trades']))
+    # --- WINRATE prioritized ---
+    best = max(results, key=lambda x: (x['winrate'], x['trades'], x['pnl']))
     return (best['fast'], best['mid'], best['slow'], best['tp']), best
 
-async def live_loop_token(symbol, fast_span, mid_span, slow_span, tp_net, log_callback=None, reoptimize_timer=TP_REOPTIMIZE_HRS*3600):
-    min_qty, step_size, min_notional = get_symbol_info(symbol)
-    in_position = False
-    fast_ema = None
-    mid_ema  = None
-    slow_ema = None
-    hist = []
-    mid_hist = []
-    entry_price = None
-    uri = f"wss://stream.binance.com:9443/ws/{symbol.lower()}@kline_1m"
-    start_time = datetime.now()
-    prev_fast = prev_mid = prev_slow = None
-    async with websockets.connect(uri, ping_interval=20) as ws:
-        async for msg in ws:
-            if (datetime.now() - start_time).total_seconds() > reoptimize_timer:
-                if log_callback: log_callback("[TIMER] 18 hours elapsed; re-optimizing...")
-                return
-            k = json.loads(msg)['k']
-            if not k['x']:
-                continue
-            o,h,l,c = map(float,(k['o'],k['h'],k['l'],k['c']))
-            price = Decimal(str(c))
-            ohlc4 = (o+h+l+c)/4
-            fast_ema = ohlc4 if fast_ema is None else next_ema(ohlc4, fast_ema, fast_span)
-            mid_ema  = ohlc4 if mid_ema  is None else next_ema(ohlc4, mid_ema,  mid_span)
-            slow_ema = ohlc4 if slow_ema is None else next_ema(ohlc4, slow_ema, slow_span)
-            hist.append(slow_ema)
-            mid_hist.append(mid_ema)
-            if len(hist)>COOLDOWN_MINUTES+1:
-                hist.pop(0)
-            if len(mid_hist)>2:
-                mid_hist.pop(0)
-            ts=datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
-            fast_prev = prev_fast if prev_fast is not None else fast_ema
-            mid_prev  = prev_mid  if prev_mid  is not None else mid_ema
-            slow_prev = prev_slow if prev_slow is not None else slow_ema
-            msglog = f"{ts} {symbol} SLOW={slow_ema:.6f}({trend_str(slow_ema,slow_prev)}) FAST={fast_ema:.6f}({trend_str(fast_ema,fast_prev)}) MID={mid_ema:.6f}({trend_str(mid_ema,mid_prev)})"
-            if log_callback: log_callback(msglog)
-            else: print(msglog)
-            # ENTRY
-            if (not in_position and len(hist) == COOLDOWN_MINUTES+1 and len(mid_hist) == 2):
-                fast_cross_up = (fast_prev < mid_prev) and (fast_ema > mid_ema)
-                fast_above_slow = fast_ema > slow_ema
-                mid_above_slow = mid_ema > slow_ema
-                if fast_cross_up and fast_above_slow and mid_above_slow:
-                    bal=await async_balance(symbol[:-4])
-                    if bal*price<=Decimal('5'):
-                        ub=await async_balance('USDT')
-                        qty=float((ub*(Decimal('1')-FEE_RATE)/price)//step_size*step_size)
-                        if Decimal(str(qty))>=min_qty:
-                            entry_price=price*(Decimal('1')+FEE_RATE)
-                            entrymsg = f"{ts} BUY {symbol}@{c:.6f} qty={qty}"
-                            if log_callback: log_callback(entrymsg)
-                            else: print(entrymsg)
-                            await async_new_order(symbol=symbol,side='BUY',type='MARKET',quantity=qty)
-                            in_position=True
-            # EXIT
-            if in_position:
-                tp_price = entry_price * (Decimal('1') + tp_net)
-                fast_cross_down = (fast_prev > mid_prev) and (fast_ema < mid_ema)
-                fast_below_slow = (fast_prev > slow_prev) and (fast_ema < slow_ema)
-                mid_below_slow = (mid_prev > slow_prev) and (mid_ema < slow_ema)
-                if price >= tp_price or fast_cross_down or fast_below_slow or mid_below_slow:
-                    qty = float((await async_balance(symbol[:-4])//step_size)*step_size)
-                    exitmsg = f"{ts} SELL {symbol}@{c:.6f} qty={qty} {'[TP]' if price>=tp_price else '[EMA cross-down]'}"
-                    if log_callback: log_callback(exitmsg)
-                    else: print(exitmsg)
-                    await async_new_order(symbol=symbol,side='SELL',type='MARKET',quantity=qty)
-                    return
-            prev_fast = fast_ema
-            prev_mid = mid_ema
-            prev_slow = slow_ema
 class ContinuousTradingWorker(QThread):
     progress = Signal(int)
     log = Signal(str)
@@ -314,7 +209,7 @@ class ContinuousTradingWorker(QThread):
                 tp_min, tp_max = self.get_tp_range_func()
                 lookback = self.get_lookback_func()
                 n_trials = self.get_ntrials_func()
-                self.log.emit(f"=== Starting full re-optimization for {symbol} (lookback {lookback}d, TP {tp_min:.2f}% - {tp_max:.2f}%, {n_trials} tests) ===")
+                self.log.emit(f"=== Starting full re-optimization for {symbol} (lookback {lookback}d, TP {tp_min:.2f}% - {tp_max:.2f}%, {n_trials} tests, 15m candles) ===")
                 best_params, stats = optimizer_single_symbol(
                     symbol,
                     lookback,
@@ -332,9 +227,8 @@ class ContinuousTradingWorker(QThread):
                 winrate = stats['winrate']
                 trades = stats['trades']
                 self.log.emit(f"Best: {symbol}, fast={f}, mid={m}, slow={s}, tp={float(tp)*100:.2f}%, PnL={pnl:.2f}, WR={winrate:.2%}, Trades={trades}")
-                self.log.emit(f"--- Live trading {symbol} (fast={f}, mid={m}, slow={s}, tp={float(tp)*100:.2f}%) ---")
-                asyncio.run(live_loop_token(symbol, f, m, s, tp, log_callback=self.log.emit))
-                self.log.emit("Position closed or timer elapsed; re-optimizing...")
+                self.log.emit(f"=== Optimization finished. ===")
+                break
             except Exception as ex:
                 self.log.emit(f"Live trading error: {ex}")
     def abort(self):
@@ -372,7 +266,7 @@ class MainWindow(QMainWindow):
         h2.addWidget(self.symbol_in)
         h2.addWidget(QLabel("Lookback (days):"))
         self.lookback_in = QLineEdit(self.lookback_val)
-        self.lookback_in.setValidator(QDoubleValidator(0.25, 60.0, 2, self))
+        self.lookback_in.setValidator(QDoubleValidator(1.0, 200.0, 2, self))
         h2.addWidget(self.lookback_in)
         h2.addWidget(QLabel("Random Tests:"))
         self.ntrials_in = QLineEdit(self.ntrials_val)
@@ -383,11 +277,11 @@ class MainWindow(QMainWindow):
         h3 = QHBoxLayout()
         h3.addWidget(QLabel("Min TP (%):"))
         self.tp_min_in = QLineEdit(self.tp_min_val)
-        self.tp_min_in.setValidator(QDoubleValidator(0.01, 10.0, 2, self))
+        self.tp_min_in.setValidator(QDoubleValidator(0.01, 30.0, 2, self))
         h3.addWidget(self.tp_min_in)
         h3.addWidget(QLabel("Max TP (%):"))
         self.tp_max_in = QLineEdit(self.tp_max_val)
-        self.tp_max_in.setValidator(QDoubleValidator(0.01, 10.0, 2, self))
+        self.tp_max_in.setValidator(QDoubleValidator(0.01, 30.0, 2, self))
         h3.addWidget(self.tp_max_in)
         layout.addLayout(h3)
 
@@ -401,9 +295,9 @@ class MainWindow(QMainWindow):
         layout.addLayout(btn_layout)
 
         action_layout = QHBoxLayout()
-        self.start_btn = QPushButton("Start Live Trading")
+        self.optimize_btn = QPushButton("Optimize")
         self.exit_btn = QPushButton("Exit")
-        action_layout.addWidget(self.start_btn)
+        action_layout.addWidget(self.optimize_btn)
         action_layout.addWidget(self.exit_btn)
         layout.addLayout(action_layout)
 
@@ -418,7 +312,7 @@ class MainWindow(QMainWindow):
         self.save_btn.clicked.connect(self.save_config)
         self.clear_btn.clicked.connect(self.clear_inputs)
         self.reset_btn.clicked.connect(self.reset_defaults)
-        self.start_btn.clicked.connect(self.start_trading)
+        self.optimize_btn.clicked.connect(self.optimize_only)
         self.exit_btn.clicked.connect(self.close)
         self.worker = None
         self.apply_api()
@@ -426,7 +320,7 @@ class MainWindow(QMainWindow):
     def get_tp_range(self):
         try:
             min_tp = max(0.01, float(self.tp_min_in.text()))
-            max_tp = min(10.0, float(self.tp_max_in.text()))
+            max_tp = min(30.0, float(self.tp_max_in.text()))
             if min_tp > max_tp:
                 min_tp, max_tp = max_tp, min_tp
             return min_tp, max_tp
@@ -439,7 +333,7 @@ class MainWindow(QMainWindow):
     def get_lookback(self):
         try:
             v = float(self.lookback_in.text())
-            return max(0.25, min(v, 60))
+            return max(1.0, min(v, 200))
         except Exception:
             return DEFAULT_LOOKBACK
 
@@ -493,14 +387,33 @@ class MainWindow(QMainWindow):
         self.tp_max_in.setText('2.0')
         self.ntrials_in.setText(str(DEFAULT_NTRIALS))
 
-    def start_trading(self):
-        self.log_out.appendPlainText("Starting continuous optimization + live trading ...")
+    def optimize_only(self):
+        self.log_out.appendPlainText("Starting parameter optimization (15m candles)...")
         self.apply_api()
-        self.worker = ContinuousTradingWorker(self.get_symbol, self.get_tp_range, self.get_lookback, self.get_ntrials)
-        self.worker.progress.connect(self.progress.setValue)
-        self.worker.log.connect(self.handle_log)
-        self.worker.finished.connect(lambda: self.log_out.appendPlainText("Trading finished."))
-        self.worker.start()
+        symbol = self.get_symbol()
+        tp_min, tp_max = self.get_tp_range()
+        lookback = self.get_lookback()
+        n_trials = self.get_ntrials()
+        def print_progress(val):
+            self.progress.setValue(val)
+        def print_log(msg):
+            self.log_out.appendPlainText(msg)
+            if msg.startswith("Best:"):
+                self.result_lbl.setText(msg)
+        best_params, stats = optimizer_single_symbol(
+            symbol,
+            lookback,
+            tp_min=tp_min,
+            tp_max=tp_max,
+            n_trials=n_trials,
+            progress_callback=print_progress,
+            log_callback=print_log
+        )
+        if best_params and stats:
+            f, m, s, tp = best_params
+            self.log_out.appendPlainText(f"\n=== Optimization Only Result ===")
+            self.log_out.appendPlainText(f"Best: {symbol}, fast={f}, mid={m}, slow={s}, tp={float(tp)*100:.2f}%, PnL={stats['pnl']:.2f}, WR={stats['winrate']:.2%}, Trades={stats['trades']}")
+            self.result_lbl.setText(f"Best Params: fast={f}, mid={m}, slow={s}, tp={float(tp)*100:.2f}%")
 
     def handle_log(self, msg):
         self.log_out.appendPlainText(msg)
